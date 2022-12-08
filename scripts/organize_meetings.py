@@ -8,8 +8,28 @@ Provide this script:
 
 This script will then output a meeting schedule where the following will be obeyed:
     1. No student will present 2+ times more than any other student
+"""
 
-SAM TODO: think about how to do constraints
+"""
+TODO: work up another version of this using bipartite matching.
+
+The big thing that you can do with a bipartite matching algorithm is assign preferences for certain dates.
+
+A few things to note:
+    1. We can only assign costs to each person-role pairing. Hard to enforce certain constraints
+        a. We can start with a bunch of random cost perturbations and produce a final fitness score
+
+So the actual algorithm will be as follows (LHS = jobs, RHS = people):
+    1. Figure out how many times each name needs to go into the RHS (s.t. |RHS| <= |LHS|)
+    2. Repeat:
+        a. Assign cost values to each person-job pairing. This will be a function of:
+            i. presentation recency
+            ii. num presentations of that type
+            iii. person index (i.e. Bob first time and Bob second time are two different people)
+            iv. person preference
+            v. random perturbations
+        b. Run bipartite matching
+        c. Compute a fitness score, and if better, assign
 """
 
 import os
@@ -18,6 +38,58 @@ import yaml
 import datetime
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+
+def compute_fitness(
+    schedule
+):
+    """
+    Compute a fitness score to handle harder constraints. This score is as follows:
+        1. Some notion of spacing
+            a. The minimum time between commitments for each person
+        2. Some other notion of balance
+            a. The standard deviation in number of commitments per person
+    """
+    #dict of person-meeting occurrences
+    res = {}
+    for i, row in schedule.iterrows():
+        date = row.values[0]
+        for name in row.values[1:]:
+            if name != '':
+                if name not in res.keys():
+                    res[name] = []
+                res[name].append(date)
+
+    #compute spacing for each person (should be len schedule if 1 element)
+    spacing = {}
+    for name, dates in res.items():
+        if len(dates) <= 1:
+            spacing[name] = (schedule.loc[len(schedule)-1]['Date'] - schedule.loc[0]['Date']).days
+        else:
+            diffs = [(dates[i+1] - dates[i]).days for i in range(len(dates)-1)]
+            spacing[name] = min(diffs)
+
+    #compute number of items for each
+    cnts = {}
+    for name, dates in res.items():
+        cnts[name] = len(dates)
+
+#    for k in res.keys():
+#        print("{} (min spacing = {}), cnt = {}".format(k, spacing[k], cnts[k]))
+#        for date in res[k]:
+#            print('\t' + str(date))
+
+    spacings = np.array([x for x in spacing.values()])
+    cnts = np.array([x for x in cnts.values()])
+
+    spacing_score = np.exp(-0.01 * spacings).sum()
+#    spacing_score = -spacings.min() / 5.
+    if spacings.min() == 0:
+        spacing_score = 1e10
+    balance_score = (cnts.max() - cnts.min())
+
+#    print('Spacing: {:.4f}, Balance: {:.4f}'.format(spacing_score, balance_score))
+    return spacing_score + balance_score, spacing_score, balance_score
 
 def generate_schedule(
         roster,
@@ -77,7 +149,8 @@ def generate_schedule(
         cnts = np.array([presentation_counts[group][k] for k in people])
         recency = np.array([presentation_recency[group][k] for k in people])
         recency = recency.max() - recency
-        scores = recency * cnts.max() + cnts
+        scores = recency * cnts.max() + cnts 
+        scores = scores + 100. * np.random.randn(scores.shape[0])
         idxs = np.argsort(scores)
 
         #put people in groups by iterating through priority scores
@@ -114,13 +187,33 @@ if __name__ == '__main__':
 
     meeting_fps = os.listdir(args.meetings_dir)
     #dont concat as meeting formats can change
-    prev_meetings = [pd.read_csv(os.path.join(args.meetings_dir, fp)) for fp in meeting_fps]
+    prev_meetings = [pd.read_csv(os.path.join(args.meetings_dir, fp)) for fp in meeting_fps if fp[-4:]=='.csv']
 
     roster = pd.read_csv(args.roster_fp)
     meeting_format = yaml.safe_load(open(args.format_fp, 'r'))
     meeting_schedule = yaml.safe_load(open(args.schedule_fp, 'r'))
 
-    new_schedule = generate_schedule(roster, prev_meetings, meeting_format, meeting_schedule)
+    best_score_hist = []
+    best_score = 1e10
+    best_schedule = None
+    n = 100000
+    for i in range(n):
+        print('{}/{} (best = {:.2f})'.format(i+1, n, best_score), end='\r')
+        new_schedule = generate_schedule(roster, prev_meetings, meeting_format, meeting_schedule)
+        score,_,_ = compute_fitness(new_schedule)
+
+        if score < best_score:
+            best_score = score
+            best_schedule = new_schedule
+            print(score, compute_fitness(new_schedule))
+
+        best_score_hist.append(best_score)
+
+    best_score_hist = np.array(best_score_hist)
+    np.save('scores/scores', best_score_hist)
+    plt.plot(best_score_hist)
+    plt.show()
+
     start_date = new_schedule["Date"].iloc[0]
     end_date = new_schedule["Date"].iloc[-1]
     fp = '{}_to_{}.csv'.format(start_date, end_date)
@@ -129,7 +222,7 @@ if __name__ == '__main__':
     for pdf in prev_meetings:
         print(pdf)
 
-    print('NEW SCHEDULE:')
+    print('NEW SCHEDULE (score={:.2f}):'.format(best_score))
     print(new_schedule)
 
     inp = input('Save schedule? [Y/n]')
