@@ -223,10 +223,10 @@ if __name__ == '__main__':
         print(pdf)
 
     print('NEW SCHEDULE (score={:.2f}):'.format(best_score))
-    print(new_schedule)
+    print(best_schedule)
 
     inp = input('Save schedule? [Y/n]')
     if inp == 'n':
         exit(0)
 
-    new_schedule.to_csv(os.path.join(args.meetings_dir, fp), index=False)
+    best_schedule.to_csv(os.path.join(args.meetings_dir, fp), index=False)
