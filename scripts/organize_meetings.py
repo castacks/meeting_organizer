@@ -132,7 +132,7 @@ def generate_schedule(
                 for k in meeting_format.keys():
                     if k in row.keys():
                         kidx = row.keys().to_list().index(k) + 1
-                        while not ((str(row[kidx]) == 'nan') or (kidx >= len(row))):
+                        while not ((kidx >= len(row)) or (str(row[kidx]) == 'nan')):
                             person = row[kidx]
                             if person in presentation_counts[k].keys():
                                 presentation_counts[k][person] += 1
@@ -196,7 +196,7 @@ if __name__ == '__main__':
     best_score_hist = []
     best_score = 1e10
     best_schedule = None
-    n = 100000
+    n = 10000
     for i in range(n):
         print('{}/{} (best = {:.2f})'.format(i+1, n, best_score), end='\r')
         new_schedule = generate_schedule(roster, prev_meetings, meeting_format, meeting_schedule)
